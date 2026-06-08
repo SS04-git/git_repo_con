@@ -1,0 +1,367 @@
+RepoForm collects a GitHub repo URL from the user.
+app/page.js receives that repo, calls /api/github, and stores the returned commit data.
+app/api/github/route.js talks to the GitHub API, fetches commits, enriches them with user info, and returns a clean JSON payload.
+ContributionGraph turns those commits into a time-based visual summary.
+CommitCard renders each individual commit in the feed.
+UserModal opens when you click a contributor and shows their GitHub profile details.
+A useful way to think about it is:
+RepoForm = input stage
+route.js = data fetching stage
+page.js = orchestration and state management stage
+ContributionGraph = analytics/visualization stage
+CommitCard = commit list stage
+UserModal = detail drill-down stage
+app/page.js
+This is the main screen of the app. It ties everything together.
+What it does:
+Keeps the main state for the app:commits: the fetched commit list
+loading: whether a fetch is in progress
+error: any API or parsing error
+repoName: the current repo name shown in the UI
+selectedUser: the GitHub user whose modal is open
+activeContributor: which contributor filter is currently selected
+
+Passes callbacks and data down into the child components.
+Renders:the repo search form
+repo stats
+contributor list
+contribution graph
+commit feed
+user modal
+
+Why it’s used:
+In React, the parent page usually owns the shared state.
+Multiple components need access to the same commit data, so the state lives here instead of being duplicated in each child.
+This file is the “controller” for the app.
+When it’s used in the process:
+It runs as soon as the page loads.
+When the user submits a repo URL, fetchCommits(owner, repo) is called.
+That function calls the API route, stores the result, and triggers the whole UI to re-render with the new data.
+Important logic:
+fetchCommits(owner, repo):sets loading state
+clears any previous error
+clears old commits
+stores the repo name
+resets contributor filter to "all"
+fetches /api/github?owner=...&repo=...
+stores the returned commits
+
+userCommitCount and sortedContributors:count how many commits each contributor made
+sort contributors by commit count descending
+
+filteredCommits:filters commits by the currently active contributor
+this is what gets passed into the graph and commit feed
+
+What to notice:
+ContributionGraph gets filteredCommits, so the graph reflects the selected contributor filter.
+CommitCard also receives filtered commits, so the feed matches the graph.
+Clicking a contributor in the sidebar changes activeContributor, which instantly updates both.
+One subtle note:
+ContributionGraph is passed both commits={filteredCommits} and allCommits={commits}, but the component only uses commits. So allCommits is currently unused.
+components/RepoForm.js
+This is the repo URL input form.
+What it does:
+Lets the user paste a GitHub repo URL.
+Validates and parses that URL.
+Calls the parent onSubmit(owner, repo) callback when valid.
+Shows a small inline error if the URL format is wrong.
+Why it’s used:
+It isolates input parsing from the rest of the app.
+The parent page does not need to know how to interpret a repo URL.
+This keeps the main page simpler and makes the input logic reusable.
+When it’s used in the process:
+It’s the first user interaction.
+The user enters something like:https://github.com/vercel/next.js
+or vercel/next.js
+
+On submit, it extracts:owner = vercel
+repo = next.js
+
+Then it hands those values to the parent so the fetch can begin.
+Important logic:
+useState("") for url:stores the typed repo string
+
+useState("") for error:stores validation feedback
+
+parseGithubUrl(input):trims whitespace
+removes a trailing .git
+accepts full GitHub URLs or simple owner/repo strings
+returns { owner, repo } or null
+
+handleSubmit(e):prevents the default form refresh
+clears the previous error
+parses the input
+if parsing fails, shows "invalid url format"
+if parsing succeeds, calls onSubmit
+
+Why the button shows a spinner:
+loading comes from the parent.
+While the API call is running, the button switches from search icon to spinner so the user knows something is happening.
+What to notice:
+This component does not fetch data itself.
+It only validates input and delegates the actual fetch to the parent page.
+app/api/github/route.js
+This is the server-side API route that fetches GitHub data.
+What it does:
+Reads owner and repo from the query string.
+Calls GitHub’s REST API.
+Gets commit data for that repository.
+Fetches profile details for each unique GitHub author.
+Returns a normalized commit list to the frontend.
+Why it’s used:
+It keeps the GitHub token on the server, not in the browser.
+It acts as a safe middle layer between your frontend and GitHub.
+It also shapes raw GitHub API data into a cleaner format that your UI can use easily.
+When it’s used in the process:
+It runs after the user submits a repo in the form.
+The frontend calls:/api/github?owner=OWNER&repo=REPO
+
+This route handles the request, talks to GitHub, and sends back JSON.
+Important logic:
+GET(request):This is the route handler for GET requests.
+
+searchParams.get("owner") and searchParams.get("repo"):reads the repo owner and name from the URL
+
+validation:if either is missing, returns a 400 error
+
+headers:includes Authorization: Bearer ${process.env.GITHUB_TOKEN}
+this is how it authenticates with GitHub
+
+fetch(${GITHUB_API}/repos/${owner}/${repo}/commits?per_page=100):fetches up to 100 commits
+
+error handling:if GitHub returns an error, the route forwards the message and status code
+
+usernameSet:collects unique GitHub usernames from the commits
+
+Promise.all(...):fetches user profiles in parallel for all unique authors
+this is faster than fetching them one by one
+
+enrichedCommits:creates a new simplified commit object for the frontend:sha
+message
+date
+authorName
+authorEmail
+githubLogin
+userDetail
+htmlUrl
+
+
+Why the enrichment matters:
+GitHub commit API data alone is not always enough for the UI.
+Your UI wants:avatar images
+usernames
+profile URLs
+readable commit metadata
+
+This route prepares that data in one place.
+What to notice:
+This is where your app becomes more than just a raw API passthrough.
+It’s acting like a backend adapter, translating GitHub’s API shape into your app’s shape.
+components/CommitCard.js
+This component renders one commit in the commit feed.
+What it does:
+Shows:contributor avatar
+commit message
+author
+date
+short SHA link to the commit on GitHub
+
+Lets the user click the avatar or username to open the user modal.
+Why it’s used:
+It keeps the commit feed modular.
+Instead of building the feed directly in the page, each commit gets its own card component.
+This makes the list easier to read, style, and maintain.
+When it’s used in the process:
+It runs after commits have been fetched.
+The parent page maps over filteredCommits and renders one CommitCard per commit.
+So this is the “individual commit display” stage of the UI.
+Important logic:
+shortSha = commit.sha.substring(0, 7):takes the first 7 characters of the SHA, which is the common short Git commit format
+
+date = new Date(commit.date).toLocaleDateString(...):formats the timestamp into a readable date like Jun 8, 2026
+
+firstLine = commit.message.split("\n")[0]:shows only the first line of the commit message
+useful because commit messages often have a title line plus a longer body
+
+avatar rendering:if commit.userDetail?.avatar_url exists, show the profile avatar
+otherwise show a fallback user icon
+
+onClick={() => onUserClick(commit.userDetail)}:opens the user modal when the avatar or username is clicked
+
+external SHA link:the short SHA is linked to commit.htmlUrl
+this opens the commit on GitHub in a new tab
+
+Why the fallback avatar exists:
+Not every commit has a GitHub-linked author profile.
+Some commits may come from an email/name that GitHub cannot match to a user.
+The fallback keeps the UI consistent even when profile data is missing.
+What to notice:
+This component is presentation-focused.
+It doesn’t own state.
+It receives everything it needs through props and notifies the parent when the user wants to open a profile.
+components/UserModal.js
+This component shows a pop-up with GitHub user details.
+What it does:
+Displays:avatar
+name
+username
+bio
+public repo count
+follower count
+following count
+company, location, blog, if available
+a link to the GitHub profile
+
+Closes when the overlay is clicked or the X button is pressed.
+Why it’s used:
+It gives the user a drill-down view into a contributor.
+Instead of cluttering the commit feed with full profile data, it shows details only when requested.
+This is a good example of progressive disclosure: basic info first, detail on demand.
+When it’s used in the process:
+It’s not visible initially.
+It appears only after the user clicks:a contributor avatar in CommitCard, or
+the contributor username button in CommitCard
+
+It disappears when the user closes it.
+Important logic:
+if (!user) return null;if there is no selected user, nothing is rendered
+this is the standard React pattern for conditional modal rendering
+
+overlay click behavior:<div style={styles.overlay} onClick={onClose}>
+clicking outside the modal closes it
+
+stop propagation:the modal content has onClick={(e) => e.stopPropagation()}
+this prevents clicks inside the modal from bubbling to the overlay and closing it
+
+conditional sections:company, location, and blog only show if that data exists
+
+profile link:opens the user’s GitHub profile in a new tab
+
+Why the modal is structured this way:
+The overlay gives the user a clear “focused” view.
+The stopPropagation behavior prevents accidental closes while interacting inside the modal.
+The conditional fields keep the modal clean when some profile data is missing.
+What to notice:
+This component is controlled entirely by the parent through user and onClose.
+It does not decide when to open itself.
+It just renders the selected user data and reports when it should close.
+components/ContributionGraph.js
+This is the most complex visual component in the app. It turns commit data into a time-based graph with multiple views.
+What it does:
+Shows commit activity in three modes:week
+month
+year
+
+Lets the user filter by contributor.
+Lets the user choose a specific month or year depending on the view.
+Uses color intensity to show higher or lower commit activity.
+Displays tooltips with exact commit counts on hover.
+Why it’s used:
+It gives a visual summary of commit activity, not just a raw list.
+Humans read patterns faster when data is grouped visually.
+It helps answer questions like:Which days were busiest?
+Which month had the most activity?
+How active was a specific contributor?
+
+When it’s used in the process:
+It appears only after commits have been loaded.
+It sits above the feed and gives the user a higher-level overview.
+It reacts to filter changes immediately without re-fetching data.
+Important logic and why it exists:
+getColor(count, max)
+Converts commit count into a color.
+Higher counts become brighter green.
+Zero commits are dark.
+This is how the graph communicates intensity visually.
+State:
+filtercontrols whether the graph shows week, month, or year
+
+selectedUsercontrols contributor filtering inside this component
+
+selectedMonthdefaulted to the current month
+
+selectedYeardefaulted to the current year
+
+Why useMemo is used:
+Several derived values are expensive to compute from the commit list.
+useMemo avoids recalculating them on every render unless the relevant inputs change.
+That matters because this component does a lot of date grouping.
+Derived lists:
+usersunique contributor names
+
+availableMonthsmonths that actually contain commits
+
+availableYearsyears that actually contain commits
+
+Why those are useful:
+They prevent the user from choosing empty time periods.
+They keep the dropdowns meaningful.
+filteredCommits
+Filters the commit list by selected user.
+This is the base data for all three views.
+monthData
+Builds a month calendar grid.
+Steps:get the selected year and month
+calculate days in the month
+calculate the weekday of the first day
+create a day-count map
+count commits per day
+build a 7-column calendar grid
+
+This is used when the user wants to inspect one month in calendar form.
+yearData
+Builds a GitHub-style yearly heatmap.
+Steps:start from the first Sunday before January 1
+generate all days through December 31
+count commits for each day
+group into weeks
+calculate month label positions
+
+This is used for a broad yearly overview.
+weekData
+Builds a simple 7-day view for the last week.
+Useful for the shortest, most immediate snapshot.
+The three subviews:
+WeekViewshows one bar per day for the last 7 days
+useful for quick recent activity
+
+MonthCalendarViewshows a calendar grid with each day colored by activity
+useful for a month-by-month investigation
+
+YearViewshows a compact heatmap grid
+useful for long-term trend spotting
+
+Tooltip behavior:
+On hover, it stores:x/y mouse position
+date
+commit count
+
+A floating tooltip appears near the cursor.
+This lets the user inspect exact values without cluttering the graph.
+Legend:
+The row of color boxes labeled “Less” to “More” explains the color scale.
+That matters because the graph is encoding data visually, so the legend teaches the mapping.
+A few design details worth noticing:
+The graph is not one static chart.
+It changes shape completely depending on the filter.
+That makes it more flexible than a single chart component.
+The contributor filter applies to all views, so the same graph can answer different questions depending on who is selected.
+One subtle implementation note:
+Several places use new Date(...).toISOString().split("T")[0].
+That is a common way to normalize to a date string, but it can be affected by timezone shifts because toISOString() is UTC-based.
+In many apps that’s fine, but it’s something to keep in mind if date boundaries look off by one day.
+How the pieces work together
+Here’s the full process in plain language:
+The user pastes a repo URL into RepoForm.
+RepoForm parses it into owner and repo.
+app/page.js receives those values and calls the backend route.
+app/api/github/route.js fetches raw GitHub commits and user profile details.
+The page stores the result in commits.
+The sidebar shows repo stats and contributors.
+ContributionGraph visualizes commit activity.
+CommitCard lists each commit.
+Clicking a contributor opens UserModal.
+If you want, I can do one of these next:
+Explain the files line by line.
+Draw the full data flow as a diagram.
+Show how the state moves from RepoForm all the way to UserModal.
