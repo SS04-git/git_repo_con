@@ -88,7 +88,8 @@ const styles = {
     fontSize: "15px", fontWeight: "500",
     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
   },
-  meta: { color: "#7aad84", margin: 0, fontSize: "13px" },
+  meta: { color: "#7aad84", fontSize: "13px", margin: 0 },
+  date: { fontSize: "12px", color: "#7aad84", whiteSpace: "nowrap" },
   author: { fontWeight: "600" },
   authorBtn: {
     background: "none", border: "none",

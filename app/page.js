@@ -1,35 +1,88 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faBox, faCodeCommit, faUser, faCircle, faCode } from "@fortawesome/free-solid-svg-icons";
+import {
+  faCodeCommit, faUser, faCircle, faCode,
+  faLock, faLockOpen, faStar, faCodeBranch,
+} from "@fortawesome/free-solid-svg-icons";
 import { faGithub } from "@fortawesome/free-brands-svg-icons";
+import Sidebar from "@/components/Sidebar";
 import RepoForm from "@/components/RepoForm";
 import CommitCard from "@/components/CommitCard";
 import UserModal from "@/components/UserModal";
 import ContributionGraph from "@/components/ContributionGraph";
+import { loadRecents, saveRecent } from "@/lib/recents";
 
-export default function Home() {
-  const [commits, setCommits] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [repoName, setRepoName] = useState("");
-  const [selectedUser, setSelectedUser] = useState(null);
+function HomeInner() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const [commits, setCommits]               = useState([]);
+  const [repoInfo, setRepoInfo]             = useState(null);
+  const [loading, setLoading]               = useState(false);
+  const [error, setError]                   = useState("");
+  const [repoName, setRepoName]             = useState("");
+  const [selectedUser, setSelectedUser]     = useState(null);
   const [activeContributor, setActiveContributor] = useState("all");
+  const [hasSearched, setHasSearched]       = useState(false);
+  const [recents, setRecents]               = useState([]);
 
-  async function fetchCommits(owner, repo) {
+  useEffect(() => {
+    setRecents(loadRecents());
+    // Auto-fetch if navigated from recents page
+    const owner  = searchParams.get("owner");
+    const repo   = searchParams.get("repo");
+    const branch = searchParams.get("branch") || "";
+    const token  = searchParams.get("token")  || "";
+    if (owner && repo) {
+      fetchCommits(owner, repo, { branch, token });
+      // Clean URL
+      router.replace("/", { scroll: false });
+    }
+  }, []);
+
+  async function fetchCommits(owner, repo, opts = {}) {
     setLoading(true);
     setError("");
     setCommits([]);
+    setRepoInfo(null);
     setRepoName(`${owner}/${repo}`);
     setActiveContributor("all");
+    setHasSearched(true);
+
+    const params = new URLSearchParams({ owner, repo });
+    if (opts.branch) params.set("branch", opts.branch);
+    if (opts.token)  params.set("token",  opts.token);
 
     try {
-      const res = await fetch(`/api/github?owner=${owner}&repo=${repo}`);
+      const res  = await fetch(`/api/github?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong");
+
       setCommits(data.commits);
+      setRepoInfo(data.repoInfo);
+
+      const entry = {
+        id: `${owner}/${repo}`,
+        owner, repo,
+        displayName: data.repoInfo?.name || repo,
+        description: data.repoInfo?.description || "",
+        isPrivate:   data.repoInfo?.private || false,
+        language:    data.repoInfo?.language || "",
+        stars:       data.repoInfo?.stars || 0,
+        defaultBranch: data.repoInfo?.defaultBranch || "",
+        branch:      opts.branch || data.repoInfo?.defaultBranch || "",
+        hasToken:    !!opts.token,
+        token:       opts.token || "",
+        commitCount: data.commits.length,
+        authorCount: new Set(data.commits.map(c => c.githubLogin || c.authorName)).size,
+        searchedAt:  new Date().toISOString(),
+      };
+      setRecents((prev) => saveRecent(entry, prev));
     } catch (err) {
       setError(err.message);
+      setHasSearched(false);
     } finally {
       setLoading(false);
     }
@@ -40,385 +93,235 @@ export default function Home() {
     const key = c.githubLogin || c.authorName;
     userCommitCount[key] = (userCommitCount[key] || 0) + 1;
   });
-
   const sortedContributors = Object.entries(userCommitCount).sort((a, b) => b[1] - a[1]);
-
   const filteredCommits = activeContributor === "all"
     ? commits
     : commits.filter((c) => (c.githubLogin || c.authorName) === activeContributor);
 
   return (
-    <div style={styles.root}>
-      {/* Scanline overlay */}
-      <div style={styles.scanlines} />
-
-      {/* LEFT SIDEBAR */}
-      <aside style={styles.sidebar}>
-
-        {/* TOP SECTION — fixed, never scrolls */}
-        <div style={styles.sidebarTop}>
-          {/* Logo */}
-          <div style={styles.sidebarLogo}>
-            <FontAwesomeIcon icon={faCode} style={{ color: "#339649", marginRight: "10px" }} />
-            <span style={styles.logoText}>GITHUB COMMITS<span style={{ color: "#339649" }}></span></span>
-          </div>
-
-          <div style={styles.divider} />
-
-          {/* Repo input */}
-          <div style={styles.sidebarSection}>
-            <p style={styles.sectionLabel}>
-              <FontAwesomeIcon icon={faGithub} style={{ marginRight: "6px" }} />
-              REPOSITORY
-            </p>
-            <RepoForm onSubmit={fetchCommits} loading={loading} />
-            {error && (
-              <div style={styles.errorBox}>
-                <span style={{ color: "#ff6b6b" }}>ERR &gt;</span> {error}
-              </div>
-            )}
-          </div>
-
-          {/* Stats */}
-          {commits.length > 0 && (
-            <>
-              <div style={styles.divider} />
-              <div style={styles.sidebarSection}>
-                <p style={styles.sectionLabel}>REPO STATS</p>
-                <div style={styles.statRow}>
-                  <FontAwesomeIcon icon={faBox} style={styles.statIcon} />
-                  <span style={styles.statLabel}>REPO</span>
-                  <span style={styles.statValue}>{repoName.split("/")[1]}</span>
+    <div className="app-shell">
+      {/* ── SIDEBAR ── */}
+      <Sidebar>
+        {hasSearched && commits.length > 0 && (
+          <>
+            {/* Current repo info */}
+            <div className="sidebar-section">
+              <p className="t-label" style={{ marginBottom: "10px" }}>CURRENT</p>
+              <div style={sideStyles.repoBlock}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                  <FontAwesomeIcon
+                    icon={repoInfo?.private ? faLock : faLockOpen}
+                    style={{ fontSize: "11px", color: repoInfo?.private ? "#ff6b6b" : "#339649", flexShrink: 0 }}
+                  />
+                  <span style={sideStyles.repoFullName}>{repoName.toUpperCase()}</span>
                 </div>
-                <div style={styles.statRow}>
-                  <FontAwesomeIcon icon={faCodeCommit} style={styles.statIcon} />
-                  <span style={styles.statLabel}>COMMITS</span>
-                  <span style={styles.statValue}>{commits.length}</span>
-                </div>
-                <div style={styles.statRow}>
-                  <FontAwesomeIcon icon={faUser} style={styles.statIcon} />
-                  <span style={styles.statLabel}>AUTHORS</span>
-                  <span style={styles.statValue}>{sortedContributors.length}</span>
+                <p style={sideStyles.repoSub}>
+                  {commits.length} commits · {sortedContributors.length} authors
+                </p>
+                {repoInfo?.description && (
+                  <p style={sideStyles.repoDesc}>{repoInfo.description}</p>
+                )}
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "8px" }}>
+                  {repoInfo?.language && <span className="tag">{repoInfo.language}</span>}
+                  {repoInfo?.stars > 0 && <span className="tag">★ {repoInfo.stars.toLocaleString()}</span>}
+                  {repoInfo?.defaultBranch && (
+                    <span className="tag">
+                      <FontAwesomeIcon icon={faCodeBranch} style={{ fontSize: "10px" }} />
+                      {repoInfo.defaultBranch}
+                    </span>
+                  )}
                 </div>
               </div>
-            </>
-          )}
+            </div>
 
-          {/* Contributors label + ALL button */}
-          {commits.length > 0 && (
-            <>
-              <div style={styles.divider} />
-              <div style={styles.sidebarSection}>
-                <p style={styles.sectionLabel}>CONTRIBUTORS</p>
-                <button
-                  style={{ ...styles.contributorRow, ...(activeContributor === "all" ? styles.contributorActive : {}) }}
-                  onClick={() => setActiveContributor("all")}
-                >
-                  <FontAwesomeIcon icon={faCircle} style={{ fontSize: "6px", color: "#339649", marginRight: "8px" }} />
-                  <span style={styles.contributorName}>ALL</span>
-                  <span style={styles.contributorBadge}>{commits.length}</span>
-                </button>
+            <div className="sidebar-divider" />
+
+            {/* Contributors */}
+            <div className="sidebar-section">
+              <p className="t-label" style={{ marginBottom: "10px" }}>CONTRIBUTORS</p>
+              <button
+                className={`contrib-row ${activeContributor === "all" ? "active" : ""}`}
+                onClick={() => setActiveContributor("all")}
+              >
+                <FontAwesomeIcon icon={faCircle} style={{ fontSize: "6px", color: "#339649", marginRight: "8px", flexShrink: 0 }} />
+                <span className="contrib-name">ALL</span>
+                <span className="contrib-badge">{commits.length}</span>
+              </button>
+            </div>
+
+            {/* Scrollable contributor list */}
+            <div className="sidebar-scroll custom-scroll">
+              <div className="sidebar-scroll-inner">
+                {sortedContributors.map(([login, count]) => {
+                  const user = commits.find((c) => (c.githubLogin || c.authorName) === login)?.userDetail;
+                  return (
+                    <button
+                      key={login}
+                      className={`contrib-row ${activeContributor === login ? "active" : ""}`}
+                      onClick={() => setActiveContributor(login)}
+                    >
+                      {user?.avatar_url ? (
+                        <img src={user.avatar_url} alt={login} className="contrib-avatar" />
+                      ) : (
+                        <FontAwesomeIcon icon={faUser} style={{ fontSize: "10px", color: "#339649", marginRight: "8px", width: "18px", flexShrink: 0 }} />
+                      )}
+                      <span className="contrib-name">@{login}</span>
+                      <span className="contrib-badge">{count}</span>
+                    </button>
+                  );
+                })}
               </div>
-            </>
-          )}
+            </div>
+          </>
+        )}
+      </Sidebar>
+
+      {/* ── MAIN ── */}
+      <main className="main-scroll">
+
+        {/* Top bar — only show after a search */}
+        {hasSearched && (
+        <div className="topbar" style={{ justifyContent: "center", position: "relative" }}>
+        <div style={{ width: "100%", maxWidth: "760px" }}>
+       <RepoForm
+        onSubmit={fetchCommits}
+        loading={loading}
+        mode="topbar"
+         />
         </div>
 
-        {/* SCROLLABLE CONTRIBUTORS LIST */}
-        {commits.length > 0 && (
-          <div style={styles.contributorScroll}>
-            <div style={styles.contributorScrollInner}>
-              {sortedContributors.map(([login, count]) => {
-                const user = commits.find((c) => (c.githubLogin || c.authorName) === login)?.userDetail;
-                const isActive = activeContributor === login;
-                return (
-                  <button
-                    key={login}
-                    style={{ ...styles.contributorRow, ...(isActive ? styles.contributorActive : {}) }}
-                    onClick={() => setActiveContributor(login)}
-                  >
-                    {user?.avatar_url ? (
-                      <img src={user.avatar_url} alt={login} style={styles.contributorAvatar} />
-                    ) : (
-                      <FontAwesomeIcon icon={faUser} style={{ fontSize: "10px", color: "#339649", marginRight: "8px", width: "18px" }} />
-                    )}
-                    <span style={styles.contributorName}>@{login}</span>
-                    <span style={styles.contributorBadge}>{count}</span>
-                  </button>
-                );
-              })}
-            </div>
+       {/* Status — absolute right so it doesn't push search */}
+       {commits.length > 0 && !loading && (
+       <div
+        style={{
+          position: "absolute",
+          right: "20px",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}
+        >
+        <div className="status-dot" />
+        <span
+          className="t-meta"
+          style={{
+            fontSize: "11px",
+            letterSpacing: "0.06em",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {filteredCommits.length} COMMITS
+          {activeContributor !== "all" &&
+            ` · @${activeContributor.toUpperCase()}`}
+        </span>
+        </div>
+         )}
+        </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div className="error-box">
+            <span className="t-danger">ERR &nbsp;</span>{error}
           </div>
         )}
 
-        {/* BOTTOM PADDING */}
-        <div style={{ flexShrink: 0, height: "16px" }} />
-      </aside>
-
-      {/* MAIN CONTENT */}
-      <main style={styles.main}>
-        {/* Top bar */}
-        <div style={styles.topBar}>
-          <div style={styles.topBarLeft}>
-            {loading ? (
-              <span style={styles.statusPulse}>
-                <FontAwesomeIcon icon={faCircle} style={{ color: "#339649", marginRight: "8px", fontSize: "8px" }} />
-                FETCHING {repoName.toUpperCase()}…
-              </span>
-            ) : commits.length > 0 ? (
-              <span style={styles.statusText}>
-                <FontAwesomeIcon icon={faCircle} style={{ color: "#339649", marginRight: "8px", fontSize: "8px" }} />
-                {repoName.toUpperCase()} &mdash; {filteredCommits.length} COMMITS
-                {activeContributor !== "all" && ` BY @${activeContributor.toUpperCase()}`}
-              </span>
-            ) : (
-              <span style={styles.statusIdle}>AWAITING REPOSITORY INPUT</span>
-            )}
-          </div>
-          <div style={styles.topBarRight}>
-            <FontAwesomeIcon icon={faGithub} style={{ color: "#339649", fontSize: "18px" }} />
-          </div>
+        {/* Landing state */}
+        {!hasSearched && !loading && (
+        <div style={pageStyles.landing}>
+        <FontAwesomeIcon icon={faCode} style={{ fontSize: "52px", color: "#2a2a2a", marginBottom: "24px", }}/>
+        <h1 className="t-heading" style={{ marginBottom: "12px", letterSpacing: "0.15em", }} >
+        COMMIT<span className="t-accent">_</span>LENS </h1>
+        <p className="t-dim" style={{ maxWidth: "360px", textAlign: "center", lineHeight: "1.8", marginBottom: "24px", }}>
+        Paste any GitHub repository URL to explore commits and contributors
+        </p>
+        <div style={{ width: "100%", maxWidth: "760px", marginBottom: "32px", }}>
+        <RepoForm onSubmit={fetchCommits} loading={loading} mode="landing" />
         </div>
 
-        {/* Empty state */}
-        {commits.length === 0 && !loading && (
-          <div style={styles.emptyState}>
-            <FontAwesomeIcon icon={faCode} style={{ fontSize: "48px", color: "#2a2a2a", marginBottom: "20px" }} />
-            <p style={styles.emptyText}>PASTE A GITHUB REPO URL IN THE SIDEBAR</p>
-            <p style={styles.emptySubtext}>e.g. https://github.com/vercel/next.js</p>
+        {recents.length > 0 && (
+        <p className="t-meta" style={{ fontSize: "12px" }}>
+        Or visit{" "}
+        <a
+          href="/recents"
+          style={{
+            color: "#339649",
+            textDecoration: "none",
+          }}
+        >
+          Recents
+        </a>{" "}
+        to re-analyse a previous search
+        </p>
+        )}
+        </div>
+        )}
+
+        {/* Loading state */}
+        {loading && (
+          <div style={pageStyles.landing}>
+            <FontAwesomeIcon icon={faCodeCommit} className="pulse" style={{ fontSize: "36px", color: "#339649", marginBottom: "20px" }} />
+            <p className="t-meta" style={{ letterSpacing: "0.1em" }}>FETCHING {repoName.toUpperCase()}…</p>
           </div>
         )}
 
-        {/* Contribution graph */}
-        {commits.length > 0 && (
-          <div style={styles.section}>
-            <ContributionGraph commits={filteredCommits} allCommits={commits} />
-          </div>
-        )}
-
-        {/* Commit feed */}
-        {commits.length > 0 && (
-          <div style={styles.section}>
-            <div style={styles.feedHeader}>
-              <span style={styles.feedTitle}>
-                <FontAwesomeIcon icon={faCodeCommit} style={{ marginRight: "8px", color: "#339649" }} />
-                COMMIT LOG
-              </span>
-              <span style={styles.feedCount}>{filteredCommits.length} entries</span>
+        {/* Results */}
+        {!loading && commits.length > 0 && (
+          <>
+            <div className="section">
+              <ContributionGraph commits={filteredCommits} allCommits={commits} />
             </div>
-            <div style={styles.commitFeed}>
-              {filteredCommits.map((commit) => (
-                <CommitCard
-                  key={commit.sha}
-                  commit={commit}
-                  onUserClick={setSelectedUser}
-                />
-              ))}
+            <div className="section">
+              <div style={pageStyles.feedHeader}>
+                <span className="t-label">
+                  <FontAwesomeIcon icon={faCodeCommit} style={{ marginRight: "8px", color: "#339649" }} />
+                  COMMIT LOG
+                </span>
+                <span className="t-meta" style={{ fontSize: "12px" }}>{filteredCommits.length} entries</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                {filteredCommits.map((commit) => (
+                  <CommitCard key={commit.sha} commit={commit} onUserClick={setSelectedUser} />
+                ))}
+              </div>
             </div>
-          </div>
+          </>
         )}
       </main>
 
       <UserModal user={selectedUser} onClose={() => setSelectedUser(null)} />
-
-      <style>{`
-        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-        .blink { animation: blink 1s step-end infinite; }
-        .pulse { animation: pulse 1.5s ease-in-out infinite; }
-
-        /* Custom scrollbar for contributors */
-        .contributor-scroll::-webkit-scrollbar { width: 4px; }
-        .contributor-scroll::-webkit-scrollbar-track { background: transparent; }
-        .contributor-scroll::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
-        .contributor-scroll::-webkit-scrollbar-thumb:hover { background: #339649; }
-      `}</style>
     </div>
   );
 }
 
-const styles = {
-  root: {
-    display: "flex",
-    minHeight: "100vh",
-    background: "#121212",
-    position: "relative",
-  },
-  scanlines: {
-    position: "fixed", inset: 0,
-    backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px)",
-    pointerEvents: "none",
-    zIndex: 100,
-  },
+export default function Home() {
+  return (
+    <Suspense>
+      <HomeInner />
+    </Suspense>
+  );
+}
 
-  // Sidebar — full height, no scroll on the outer container
-  sidebar: {
-    width: "280px",
-    minWidth: "280px",
-    background: "#0e0e0e",
-    borderRight: "1px solid #1f1f1f",
-    display: "flex",
-    flexDirection: "column",
-    height: "100vh",
-    position: "sticky",
-    top: 0,
-    overflow: "hidden",       // ← outer sidebar never scrolls
-  },
-
-  // Everything above the contributors list — never scrolls
-  sidebarTop: {
-    flexShrink: 0,            // ← stays fixed height, won't grow
-  },
-
-  // The contributors list — takes remaining space and scrolls
-  contributorScroll: {
-    flex: 1,                  // ← fills leftover space
-    overflowY: "auto",        // ← only this scrolls
-    minHeight: 0,             // ← required for flex + overflow to work
-  },
-  contributorScrollInner: {
-    padding: "0 20px 8px",
-  },
-
-  sidebarLogo: {
-    padding: "24px 20px",
-    display: "flex",
-    alignItems: "center",
-    borderBottom: "1px solid #1f1f1f",
-  },
-  logoText: {
-    fontSize: "16px",
-    fontWeight: "700",
-    color: "#edeced",
-    letterSpacing: "0.15em",
-  },
-  divider: {
-    height: "1px",
-    background: "#1f1f1f",
-  },
-  sidebarSection: {
-    padding: "16px 20px",
-  },
-  sectionLabel: {
-    fontSize: "10px",
-    color: "#555",
-    letterSpacing: "0.2em",
-    margin: "0 0 12px",
-    fontWeight: "700",
-  },
-  statRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    padding: "7px 0",
-    borderBottom: "1px solid #1a1a1a",
-  },
-  statIcon: { color: "#339649", fontSize: "11px", width: "14px" },
-  statLabel: { fontSize: "10px", color: "#555", letterSpacing: "0.1em", flex: 1 },
-  statValue: { fontSize: "12px", color: "#edeced", fontWeight: "700" },
-  contributorRow: {
-    display: "flex",
-    alignItems: "center",
-    width: "100%",
-    background: "transparent",
-    border: "1px solid transparent",
-    borderRadius: "6px",
-    padding: "8px 10px",
-    cursor: "pointer",
-    marginBottom: "4px",
-    color: "#edeced",
-    textAlign: "left",
-    transition: "all 0.15s",
-    boxSizing: "border-box",
-  },
-  contributorActive: {
-    background: "#0d2e16",
-    border: "1px solid #339649",
-  },
-  contributorAvatar: {
-    width: "18px", height: "18px",
-    borderRadius: "50%",
-    marginRight: "8px",
-    objectFit: "cover",
-    flexShrink: 0,
-  },
-  contributorName: {
-    fontSize: "12px",
-    color: "#edeced",
-    flex: 1,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-  contributorBadge: {
-    fontSize: "10px",
-    background: "#1a1a1a",
-    color: "#339649",
-    padding: "2px 7px",
-    borderRadius: "4px",
-    fontWeight: "700",
-    border: "1px solid #2a2a2a",
-    flexShrink: 0,
-  },
-  errorBox: {
-    marginTop: "10px",
-    padding: "10px",
-    background: "#1a0000",
-    border: "1px solid #ff6b6b",
-    borderRadius: "6px",
-    fontSize: "11px",
-    color: "#adc9b0",
-    lineHeight: "1.6",
-  },
-
-  // Main content scrolls normally with the page
-  main: {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    minWidth: 0,
-  },
-  topBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "16px 28px",
-    borderBottom: "1px solid #1f1f1f",
-    background: "#0e0e0e",
-    position: "sticky",
-    top: 0,
-    zIndex: 10,
-  },
-  topBarLeft: { fontSize: "12px", letterSpacing: "0.1em" },
-  topBarRight: {},
-  statusPulse: { color: "#339649" },
-  statusText: { color: "#7aad84" },
-  statusIdle: { color: "#333", fontSize: "12px" },
-  emptyState: {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "80px 40px",
-    textAlign: "center",
-  },
-  emptyText: { color: "#333", fontSize: "13px", letterSpacing: "0.2em", margin: "0 0 10px" },
-  emptySubtext: { color: "#2a2a2a", fontSize: "11px", margin: 0 },
-  section: {
-    padding: "24px 28px",
-    borderBottom: "1px solid #1a1a1a",
+const pageStyles = {
+  landing: {
+    flex: 1, display: "flex", flexDirection: "column",
+    alignItems: "center", justifyContent: "center",
+    padding: "80px 40px", textAlign: "center",
+    minHeight: "60vh",
   },
   feedHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: "16px",
+    display: "flex", alignItems: "center",
+    justifyContent: "space-between", marginBottom: "16px",
   },
-  feedTitle: { fontSize: "11px", color: "#555", letterSpacing: "0.2em", fontWeight: "700" },
-  feedCount: { fontSize: "11px", color: "#339649" },
-  commitFeed: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "2px",
+};
+
+const sideStyles = {
+  repoBlock: { padding: "2px 0" },
+  repoFullName: {
+    fontSize: "12px", fontWeight: "700",
+    color: "#edeced", letterSpacing: "0.05em",
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
   },
+  repoSub: { fontSize: "12px", color: "#7aad84", marginTop: "2px" },
+  repoDesc: { fontSize: "12px", color: "#666", marginTop: "6px", lineHeight: "1.5" },
 };
