@@ -27,6 +27,7 @@ function HomeInner() {
   const [activeContributor, setActiveContributor] = useState("all");
   const [hasSearched, setHasSearched]       = useState(false);
   const [recents, setRecents]               = useState([]);
+  const [currentToken, setCurrentToken]     = useState("");
 
   useEffect(() => {
     setRecents(loadRecents());
@@ -50,6 +51,7 @@ function HomeInner() {
     setRepoName(`${owner}/${repo}`);
     setActiveContributor("all");
     setHasSearched(true);
+    setCurrentToken(opts.token || "");
 
     const params = new URLSearchParams({ owner, repo });
     if (opts.branch) params.set("branch", opts.branch);
@@ -281,7 +283,7 @@ function HomeInner() {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                 {filteredCommits.map((commit) => (
-                  <CommitCard key={commit.sha} commit={commit} onUserClick={setSelectedUser} />
+                  <CommitCard key={commit.sha} commit={commit} onUserClick={setSelectedUser} owner={repoName.split("/")[0]} repo={repoName.split("/")[1]} token={currentToken}/>
                 ))}
               </div>
             </div>

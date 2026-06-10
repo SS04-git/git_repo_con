@@ -356,6 +356,109 @@ export default function RootLayout({ children }) {
           }
 
           /* ══════════════════════════════════════════
+             CODE DIFF PANEL
+          ══════════════════════════════════════════ */
+          .diff-panel {
+            background: #0e0e0e; border: 1px solid #339649;
+            border-top: none; border-radius: 0 0 10px 10px;
+            margin-bottom: 8px; overflow: hidden;
+          }
+          .diff-panel-header {
+            display: flex; align-items: center;
+            justify-content: space-between; gap: 12px;
+            padding: 10px 16px; background: #141414;
+            border-bottom: 1px solid #1f1f1f;
+          }
+          .diff-panel-title {
+            font-size: 12px; font-weight: 700; color: #edeced;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          }
+          .diff-panel-sha {
+            font-size: 11px; color: #339649; font-family: monospace;
+            flex-shrink: 0; background: #0d2e16;
+            padding: 2px 7px; border-radius: 4px;
+          }
+          .diff-close-btn {
+            background: none; border: none; color: #666;
+            cursor: pointer; font-size: 14px; padding: 2px 4px;
+            transition: color 0.15s;
+          }
+          .diff-close-btn:hover { color: #edeced; }
+          .diff-panel-center {
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            padding: 28px; gap: 8px;
+          }
+          .diff-file-list { max-height: 500px; overflow-y: auto; }
+          .diff-file-entry { border-bottom: 1px solid #1a1a1a; }
+          .diff-file-row {
+            display: flex; align-items: center; gap: 8px;
+            padding: 9px 16px; transition: background 0.15s; cursor: pointer;
+          }
+          .diff-file-row:hover { background: #141414; }
+          .diff-status-badge {
+            font-size: 9px; font-weight: 700; color: #121212;
+            padding: 2px 5px; border-radius: 3px; flex-shrink: 0;
+            letter-spacing: 0.05em;
+          }
+          .diff-file-name {
+            font-size: 12px; color: #edeced; font-family: monospace;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+          }
+          .diff-add-stat { font-size: 11px; color: #4db863; display: flex; align-items: center; gap: 3px; }
+          .diff-del-stat { font-size: 11px; color: #ff6b6b; display: flex; align-items: center; gap: 3px; }
+          .diff-tab-btn {
+            background: transparent; border: 1px solid #2a2a2a;
+            border-radius: 4px; color: #555; cursor: pointer;
+            font-size: 10px; font-weight: 700; padding: 3px 8px;
+            font-family: inherit; letter-spacing: 0.08em; transition: all 0.15s;
+          }
+          .diff-tab-btn.active { background: #0d2e16; border-color: #339649; color: #339649; }
+          .diff-patch {
+            font-family: monospace; font-size: 12px;
+            overflow-x: auto; background: #0a0a0a;
+            max-height: 360px; overflow-y: auto;
+          }
+          .diff-line {
+            padding: 1px 16px; white-space: pre;
+            line-height: 1.6; min-width: max-content;
+            border-left: 2px solid transparent;
+          }
+          .diff-line-add  { background: #0d2e16; color: #4db863; border-left-color: #339649; }
+          .diff-line-del  { background: #2e0d0d; color: #ff6b6b; border-left-color: #ff6b6b; }
+          .diff-line-hunk { background: #0e1a2e; color: #7aad84; border-left-color: #3399aa; }
+          .diff-line-ctx  { color: #aaa; }
+          .diff-file-line {
+            padding: 1px 16px; white-space: pre;
+            line-height: 1.6; min-width: max-content;
+            border-left: 2px solid transparent;
+            color: #ccc; display: flex; gap: 16px;
+          }
+          .diff-line-num {
+            color: #444; user-select: none;
+            min-width: 32px; text-align: right; flex-shrink: 0;
+          }
+          .diff-no-patch {
+            padding: 12px 16px; font-size: 12px;
+            color: #555; font-style: italic;
+          }
+          .diff-no-files {
+            padding: 16px; font-size: 12px;
+            color: #555; text-align: center;
+          }
+          .commit-code-btn {
+            background: #0d2e16; border: 1px solid #1a4d2e;
+            border-radius: 5px; color: #7aad84;
+            cursor: pointer; font-size: 11px; font-weight: 700;
+            padding: 5px 10px; font-family: inherit;
+            letter-spacing: 0.08em; transition: all 0.15s;
+            display: flex; align-items: center; gap: 5px;
+            min-width: 58px; justify-content: center;
+          }
+          .commit-code-btn.active { background: #143d20; border-color: #339649; color: #339649; }
+          .commit-code-btn:hover  { border-color: #339649; color: #339649; }
+
+          /* ══════════════════════════════════════════
              ANIMATIONS
           ══════════════════════════════════════════ */
           @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
